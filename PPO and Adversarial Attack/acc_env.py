@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[30]:
+# In[4]:
 
 
 # Cell 1: imports & constants
@@ -32,37 +32,39 @@ OBS_HIGH = np.array([200.0, 30.0, 40.0], dtype=np.float32)
 DEFAULT_SEED = 2025
 
 
-# In[31]:
+# In[5]:
 
 
-# Cell 2: ACCEnv implementation
+# ===== ACCEnv (self-contained with _apply_safety) =====
+from typing import Optional
+import numpy as np
+import gymnasium as gym
+from gymnasium import spaces
+
+# ---- Constants ----
+DT = 0.1
+TH = 1.5
+D0 = 5.0
+V_REF = 15.0
+A_MIN = -3.5
+A_MAX =  2.0
+OBS_LOW  = np.array([0.0,  -20.0,  0.0], dtype=np.float32)
+OBS_HIGH = np.array([200.0,  20.0, 30.0], dtype=np.float32)
+DEFAULT_SEED = 0
 
 class ACCEnv(gym.Env):
     """
-    Simple 1D Adaptive Cruise Control (ACC) environment with Control Barrier Function (CBF) safety filter.
+    1D Adaptive Cruise Control (ACC) with Control Barrier Function (CBF) safety filter.
 
     State: [dx, dv, v]
-      - dx = x_lead - x_ego (headway distance, m)
-      - dv = v_lead - v_ego (relative speed, m/s)
-      - v  = v_ego (ego speed, m/s)
+    Action: scalar acceleration a ∈ [A_MIN, A_MAX]
 
-    Action: scalar acceleration 'a' in [A_MIN, A_MAX]
-
-    Important API methods provided for attacks:
-      - set_safety_obs_for_filter(perturbed_obs): if evaluation code wants the CBF to evaluate safety using
-        the perturbed observation (so clamp uses the attacked view), call this method before stepping.
-      - clear_safety_obs_for_filter(): resets that temporary perturbed observation so baseline evaluations
-        use the true state.
-
-    Notes about normalization:
-      - If you plan to use Stable-Baselines3 VecNormalize, wrap the env with VecNormalize before
-        training/evaluation. This class supports two modes: normalize_obs=True (env returns normalized observations)
-        or False (raw physical values returned). When using VecNormalize you should set normalize_obs=False
-        here and let the wrapper normalize states consistently. However, to avoid confusion the env contains
-        `normalize_obs` toggle to optionally perform simple min-max scaling when desired.
+    Attack-aware hook:
+      env.set_safety_obs_for_filter(obs_adv)
+    makes the safety filter use attacked obs for one step.
     """
 
-    metadata = {"render_modes": ["human"], "render_fps": int(1/DT)}
+    metadata = {"render_modes": ["human"], "render_fps": int(1 / DT)}
 
     def __init__(self, normalize_obs: bool = False, seed: Optional[int] = None):
         super().__init__()
@@ -70,160 +72,163 @@ class ACCEnv(gym.Env):
         self.seed_val = seed if seed is not None else DEFAULT_SEED
         self.np_random, _ = gym.utils.seeding.np_random(self.seed_val)
 
-        # Observation: dx, dv, v (headway, relative speed, ego speed)
         self.observation_space = spaces.Box(low=OBS_LOW, high=OBS_HIGH, dtype=np.float32)
-        # Action: single continuous acceleration
         self.action_space = spaces.Box(low=np.array([A_MIN], dtype=np.float32),
                                        high=np.array([A_MAX], dtype=np.float32), dtype=np.float32)
 
-        # Internal state
-        self.x_ego = 0.0
-        self.x_lead = 20.0  # initial lead position
-        self.v_ego = V_REF - 0.5
-        self.v_lead = V_REF
-        self.a_ego = 0.0
+        # internal state
+        self.x_ego, self.x_lead, self.v_ego, self.v_lead, self.a_ego = 0.0, 20.0, V_REF-0.5, V_REF, 0.0
 
-        # Safety filter support
-        self._safety_obs_override = None  # if set, safety filter uses this perturbed obs for clamp calc
+        # attack-aware override
+        self._safety_obs_override = None
 
-        # Logging
-        self.current_step = 0
-        self.max_steps = 400
-        self.collision = False
+        # logging
+        self.current_step, self.max_steps, self.collision = 0, 400, False
 
         self.reset()
 
-    # --------------------- Normalization helpers ---------------------
+    # ---------- Helpers ----------
     def _obs_to_array(self):
-        dx = float(self.x_lead - self.x_ego)
-        dv = float(self.v_lead - self.v_ego)
-        v  = float(self.v_ego)
-        arr = np.array([dx, dv, v], dtype=np.float32)
-        return arr
+        return np.array([self.x_lead - self.x_ego, self.v_lead - self.v_ego, self.v_ego], dtype=np.float32)
 
     def _normalize(self, obs: np.ndarray) -> np.ndarray:
-        low = OBS_LOW
-        high = OBS_HIGH
-        scaled = 2.0 * (obs - low) / (high - low) - 1.0
-        return scaled.astype(np.float32)
+        return (2.0 * (obs - OBS_LOW) / (OBS_HIGH - OBS_LOW + 1e-8) - 1.0).astype(np.float32)
 
     def _denormalize(self, obs_norm: np.ndarray) -> np.ndarray:
-        low = OBS_LOW
-        high = OBS_HIGH
-        return (((obs_norm + 1.0) / 2.0) * (high - low) + low).astype(np.float32)
+        return (((obs_norm + 1.0) / 2.0) * (OBS_HIGH - OBS_LOW) + OBS_LOW).astype(np.float32)
 
-    # --------------------- Safety filter / CBF ---------------------
-    def _compute_amax_safe(self, obs_for_filter: np.ndarray) -> float:
-        dx, dv, v = float(obs_for_filter[0]), float(obs_for_filter[1]), float(obs_for_filter[2])
-        num = dx - TH * v + (self.v_lead - v) * DT
-        denom = TH * DT
-        if denom <= 0:
-            return A_MIN
-        a_max_safe = num / denom
-        a_max_safe = np.clip(a_max_safe, A_MIN, A_MAX)
-        return float(a_max_safe)
-
-    def set_safety_obs_for_filter(self, obs_perturbed: np.ndarray):
-        self._safety_obs_override = np.array(obs_perturbed, dtype=np.float32)
+    def set_safety_obs_for_filter(self, obs):
+        self._safety_obs_override = np.array(obs, dtype=np.float32)
 
     def clear_safety_obs_for_filter(self):
         self._safety_obs_override = None
 
-    # --------------------- Core gym API ---------------------
+    def _compute_amax_safe(self, obs_for_filter: np.ndarray) -> float:
+        dx, dv, v = float(obs_for_filter[0]), float(obs_for_filter[1]), float(obs_for_filter[2])
+        num = dx - TH * v + (self.v_lead - v) * DT
+        denom = TH * DT
+        if denom <= 0: return A_MIN
+        return float(np.clip(num / (denom + 1e-8), A_MIN, A_MAX))
+
+    def _apply_safety(self, a_rl: float, dx: float, dv: float, v: float) -> float:
+        """
+        Optional helper: compute the CBF clamp given a proposed action and a raw state (dx,dv,v).
+        (Your step() already handles the override + clamp; this is just for completeness.)
+        """
+        a_safe_max = self._compute_amax_safe(np.array([dx, dv, v], dtype=np.float32))
+        a_clamped = min(a_rl, a_safe_max)
+        return float(np.clip(a_clamped, A_MIN, A_MAX))
+
+    # ---------- Gym API ----------
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
-        self.current_step = 0
-        self.collision = False
         if seed is not None:
             self.seed_val = int(seed)
             self.np_random, _ = gym.utils.seeding.np_random(self.seed_val)
 
-        self.x_ego = 0.0
-        self.x_lead = 30.0 + self.np_random.uniform(-1.0, 1.0)
+        self.current_step, self.collision = 0, False
+        self.x_ego, self.x_lead = 0.0, 30.0 + self.np_random.uniform(-1.0, 1.0)
         self.v_ego = V_REF - 0.5 + self.np_random.uniform(-0.2, 0.2)
         self.v_lead = V_REF + self.np_random.uniform(-0.5, 0.5)
-        self.a_ego = 0.0
+        self.a_ego, self._safety_obs_override = 0.0, None
 
         obs = self._obs_to_array()
-        if self.normalize_obs:
-            obs_out = self._normalize(obs)
-        else:
-            obs_out = obs
-        return obs_out, {}
+        return (self._normalize(obs) if self.normalize_obs else obs), {}
 
     def step(self, action: np.ndarray):
-        if isinstance(action, (list, tuple, np.ndarray)):
-            a = float(np.array(action).reshape(-1)[0])
-        else:
-            a = float(action)
+        a = float(np.array(action).reshape(-1)[0]) if isinstance(action, (list, tuple, np.ndarray)) else float(action)
 
         if self._safety_obs_override is not None:
             obs_for_filter = self._safety_obs_override
-            if np.max(np.abs(obs_for_filter)) <= 1.1:
+            if np.max(np.abs(obs_for_filter)) <= 1.1 and self.normalize_obs:
                 obs_for_filter = self._denormalize(obs_for_filter)
+            self._safety_obs_override = None
         else:
             obs_for_filter = self._obs_to_array()
 
-        a_max_safe = self._compute_amax_safe(obs_for_filter)
-        a_clamped = min(a, a_max_safe)
-        a_clamped = float(np.clip(a_clamped, A_MIN, A_MAX))
+        a_clamped = self._apply_safety(a, obs_for_filter[0], obs_for_filter[1], obs_for_filter[2])
 
-        self.x_ego = float(self.x_ego + self.v_ego * DT + 0.5 * a_clamped * DT * DT)
+        self.x_ego += self.v_ego * DT + 0.5 * a_clamped * DT * DT
         self.v_ego = float(np.clip(self.v_ego + a_clamped * DT, 0.0, 100.0))
         self.a_ego = a_clamped
 
-        if hasattr(self, 'lead_acc'):
+        if hasattr(self, "lead_acc") and self.lead_acc is not None:
             self.v_lead = float(np.clip(self.v_lead + self.lead_acc * DT, 0.0, 100.0))
-            self.x_lead = float(self.x_lead + self.v_lead * DT + 0.5 * self.lead_acc * DT * DT)
+            self.x_lead += self.v_lead * DT + 0.5 * self.lead_acc * DT * DT
         else:
-            self.x_lead = float(self.x_lead + self.v_lead * DT)
+            self.x_lead += self.v_lead * DT
 
         self.current_step += 1
 
         obs = self._obs_to_array()
-        info = {}
-        if obs[0] <= 0.0:
-            self.collision = True
-            info['collision'] = True
-        else:
-            info['collision'] = False
+        collision = obs[0] <= 0.0
+        if collision: self.collision = True
 
-        info['dx'] = float(obs[0])
-        info['ego_v'] = float(obs[2])
-        info['lead_v'] = float(self.v_lead)
-        info['applied_action'] = float(a_clamped)
+        info = {
+            "collision": collision,
+            "dx": float(obs[0]),
+            "ego_v": float(obs[2]),
+            "lead_v": float(self.v_lead),
+            "applied_action": float(a_clamped),
+        }
 
         speed_err = (self.v_ego - V_REF)
         dsafe = D0 + TH * self.v_ego
         safe_pen = max(0.0, dsafe - obs[0])
         action_pen = 0.5 * (a_clamped ** 2)
+        reward = -(0.5 * speed_err**2 + 2.0 * safe_pen**2 + 0.01 * action_pen)
 
-        wv, ws, wa = 0.5, 2.0, 0.01
-        reward = - wv * (speed_err**2) - ws * (safe_pen**2) - wa * action_pen
+        done = self.collision or (self.current_step >= self.max_steps)
+        if self.collision: info["terminal_reason"] = "collision"
+        elif self.current_step >= self.max_steps: info["terminal_reason"] = "time_limit"
 
-        done = False
-        if self.collision:
-            done = True
-            info['terminal_reason'] = 'collision'
-        elif self.current_step >= self.max_steps:
-            done = True
-            info['terminal_reason'] = 'time_limit'
+        obs_out = self._normalize(obs) if self.normalize_obs else obs
+        return obs_out, float(reward), bool(done and self.collision), bool(done and not self.collision), info
 
-        if self.normalize_obs:
-            obs_out = self._normalize(obs)
-        else:
-            obs_out = obs
-
-        return obs_out, float(reward), bool(done), False, info
-
-    def render(self, mode='human'):
-        print(f"step={self.current_step:03d} dx={self.x_lead - self.x_ego:.3f} "
-              f"v_e={self.v_ego:.3f} v_l={self.v_lead:.3f} a={self.a_ego:.3f}")
+    def render(self, mode="human"):
+        print(f"step={self.current_step:03d}  dx={self.x_lead - self.x_ego:6.3f}  "
+              f"v_e={self.v_ego:5.2f}  v_l={self.v_lead:5.2f}  a={self.a_ego:5.2f}")
 
     def close(self):
         pass
 
 
-# In[32]:
+# In[6]:
+
+
+# === Sanity check for ACCEnv with safety filter ===
+env = ACCEnv(normalize_obs=True, seed=42)
+
+obs, _ = env.reset()
+print("Reset OK. Initial obs (normalized):", obs)
+
+# 1. Step normally with an aggressive action
+print("\n[Baseline step]")
+action = np.array([2.0], dtype=np.float32)  # strong acceleration
+obs, r, term, trunc, info = env.step(action)
+print("Applied action=2.0 -> clamped:", info["applied_action"], 
+      "dx:", info["dx"], "collision:", info["collision"])
+
+# 2. Force override: fake small headway to trigger clamp
+print("\n[Override with adversarial observation]")
+obs_fake_close = np.array([-0.99, 0.0, 0.0], dtype=np.float32)  # tiny headway, normalized
+env.set_safety_obs_for_filter(obs_fake_close)
+obs, r, term, trunc, info = env.step(action)
+print("Applied action=2.0 with override -> clamped:", info["applied_action"], 
+      "dx:", info["dx"], "collision:", info["collision"])
+
+# 3. Check that override is consumed (next step should use true obs again)
+print("\n[Next step after override consumed]")
+obs, r, term, trunc, info = env.step(action)
+print("Applied action=2.0 (no override) -> clamped:", info["applied_action"], 
+      "dx:", info["dx"], "collision:", info["collision"])
+
+# 4. Directly test _apply_safety helper
+print("\n[Direct _apply_safety check]")
+print("Clamp from helper (dx=2.0, dv=0.0, v=15.0):",
+      env._apply_safety(a_rl=2.0, dx=2.0, dv=0.0, v=15.0))
+
+
+# In[ ]:
 
 
 # Cell 3: quick sanity run
@@ -245,7 +250,7 @@ if __name__ == '__main__':
     print('episode return:', total_r, 'collision:', info.get('collision', False))
 
 
-# In[33]:
+# In[ ]:
 
 
 # Logging helpers
@@ -315,7 +320,7 @@ def simple_policy(obs):
     return np.array([float(np.clip(a_cmd, A_MIN, A_MAX))], dtype=np.float32)
 
 
-# In[34]:
+# In[ ]:
 
 
 # Example wiring for evaluation with SB3 + VecNormalize
@@ -385,7 +390,7 @@ def eval_model_with_attacks(model, vec_norm, n_episodes=100, attack_fn=None, eps
 # res_oia  = eval_model_with_attacks(model, vec_norm, n_episodes=100, attack_fn=oia_fn, eps=0.01)
 
 
-# In[35]:
+# In[ ]:
 
 
 # Save/export helpers
