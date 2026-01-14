@@ -10,6 +10,12 @@ class AttackBase:
         self.epsilon = epsilon
         self.device = next(model.policy.parameters()).device
     
+
+    def __init__(self, model, epsilon=0.01): 
+        self.model = model
+        self.epsilon = epsilon
+        self.device = next(model.policy.parameters()).device
+    
     def perturb(self, obs):
 
         raise NotImplementedError
