@@ -205,16 +205,16 @@ python analyze.py  # Analyzes results/summary.json
 
 ## 🧯 Troubleshooting
 
-**Issue**: Training is slow
+**🐢 Issue**: Training is slow
 - Reduce `n_envs` in `train.py` if memory is limited
 - Training on GPU will be faster if PyTorch CUDA is available
 
-**Issue**: Evaluation results show no difference between attacks
+**🤔 Issue**: Evaluation results show no difference between attacks
 - Ensure epsilon is not too small (try 0.02)
 - Verify VecNormalize stats are loaded correctly
 - Check that safety filter is using adversarial observations
 
-**Issue**: All episodes have collisions
+**💥 Issue**: All episodes have collisions
 - Reduce epsilon value
 - Verify safety filter is functioning (check `applied_action` vs `rl_action`)
 - Retrain with more timesteps
