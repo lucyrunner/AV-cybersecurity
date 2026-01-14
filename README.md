@@ -1,8 +1,8 @@
-# PPO and Adversarial Attacks on ACC Environment
+# 🚗💥 PPO and Adversarial Attacks on ACC Environment
 
 Clean implementation of the simplified 1D Adaptive Cruise Control (ACC) environment with PPO training and adversarial attacks (FGSM and OIA).
 
-## Project Structure
+## 📁 Project Structure
 
 ```
 .
@@ -28,15 +28,15 @@ Clean implementation of the simplified 1D Adaptive Cruise Control (ACC) environm
     └── metrics.png
 ```
 
-## Installation
+## ⚙️ Installation
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Usage
+## 🚀 Usage
 
-### 1. Train PPO Agent
+### 1️⃣ Train PPO Agent
 
 Train the PPO agent on the ACC environment with observation normalization:
 
@@ -45,15 +45,15 @@ python train.py
 ```
 
 This will:
-- Create 8 parallel environments
-- Train for 200,000 timesteps
-- Save checkpoints every 50,000 steps
-- Save final model to `models/ppo_acc_final.zip`
-- Save normalization statistics to `models/vec_normalize.pkl`
+- ✅ Create 8 parallel environments
+- 🧠 Train for 200,000 timesteps
+- 💾 Save checkpoints every 50,000 steps
+- 📦 Save final model to `models/ppo_acc_final.zip`
+- 📊 Save normalization statistics to `models/vec_normalize.pkl`
 
 Training takes approximately 5-10 minutes on a modern CPU.
 
-### 2. Evaluate Agent
+### 2️⃣ Evaluate Agent
 
 Evaluate the trained agent under baseline and attack conditions.
 
@@ -83,14 +83,14 @@ python evaluate.py --multi-epsilon --scenario challenging
 ```
 
 This will:
-- Run 100 episodes for each condition (baseline, FGSM, OIA)
-- Compute collision rates, episode returns, and jerk metrics
-- Save results to `results/summary.json`
-- Save sample trajectories to `results/trajectory_*.npz`
+- 🎬 Run 100 episodes for each condition (baseline, FGSM, OIA)
+- 📉 Compute collision rates, episode returns, and jerk metrics
+- 📝 Save results to `results/summary.json`
+- 🗂️ Save sample trajectories to `results/trajectory_*.npz`
 
 Evaluation takes approximately 2-3 minutes per scenario.
 
-### 3. Visualize Results
+### 3️⃣ Visualize Results
 
 Generate plots from evaluation results:
 
@@ -99,22 +99,22 @@ python visualize.py
 ```
 
 This creates:
-- `results/comparison.png` - Side-by-side trajectory comparison
-- `results/metrics.png` - Bar charts of collision rate, return, and jerk
-- `results/plot_baseline.png` - Individual baseline trajectory
-- `results/plot_fgsm.png` - Individual FGSM trajectory
-- `results/plot_oia.png` - Individual OIA trajectory
+- 🖼️ `results/comparison.png` - Side-by-side trajectory comparison
+- 📊 `results/metrics.png` - Bar charts of collision rate, return, and jerk
+- 📍 `results/plot_baseline.png` - Individual baseline trajectory
+- ⚡ `results/plot_fgsm.png` - Individual FGSM trajectory
+- 🧨 `results/plot_oia.png` - Individual OIA trajectory
 
-## Key Components
+## 🧩 Key Components
 
-### ACC Environment (`acc_env.py`)
+### 🛣️ ACC Environment (`acc_env.py`)
 
 - **State**: `[dx, dv, v]` where dx is distance headway, dv is relative velocity, v is ego velocity
 - **Action**: Scalar acceleration in `[-3.5, 2.0]` m/s²
 - **Safety Filter**: CBF-based clamp ensuring `h(s) = dx - T_h * v >= 0`
 - **Reward**: Penalizes speed error, unsafe distances, and aggressive actions
 
-### Attacks (`attacks.py`)
+### 🧪 Attacks (`attacks.py`)
 
 **FGSM (Fast Gradient Sign Method)**
 - Perturbs observation to maximize change in policy output
@@ -125,14 +125,14 @@ This creates:
 - `s' = s + ε · sign(∇_s V_φ(s))`
 - Makes agent overly optimistic, delaying critical braking
 
-### Training (`train.py`)
+### 🏋️ Training (`train.py`)
 
 - Uses Stable-Baselines3 PPO implementation
 - 8 parallel environments for faster training
 - VecNormalize wrapper for observation normalization
 - Hyperparameters follow assignment suggestions
 
-### Evaluation (`evaluate.py`)
+### 📏 Evaluation (`evaluate.py`)
 
 Runs three evaluation conditions:
 1. **Baseline**: No attack
@@ -144,7 +144,7 @@ Metrics computed:
 - Mean episode return (higher is better)
 - Mean jerk (lower is smoother)
 
-## Expected Results
+## 📌 Expected Results
 
 Based on the assignment specifications:
 
@@ -157,7 +157,7 @@ Based on the assignment specifications:
 
 The key insight is that OIA is more effective because it makes the agent believe it's in a safer state, causing delayed reactions to critical situations.
 
-## Customization
+## 🛠️ Customization
 
 ### Run Different Scenarios
 
@@ -172,7 +172,7 @@ python evaluate.py --scenario challenging
 python evaluate.py --scenario gentle
 ```
 
-### Modify Attack Strength
+### 🎛️ Modify Attack Strength
 
 ```bash
 # Weaker attack
@@ -185,25 +185,25 @@ python evaluate.py --epsilon 0.02
 python evaluate.py --multi-epsilon --epsilons 0.005 0.01 0.015 0.02
 ```
 
-### Change Number of Episodes
+### 🔁 Change Number of Episodes
 
 ```bash
 python evaluate.py --n-episodes 200
 ```
 
-### Specify Output Directory
+### 📂 Specify Output Directory
 
 ```bash
 python evaluate.py --output-dir my_results
 ```
 
-### Analyze Existing Results
+### 📊 Analyze Existing Results
 
 ```bash
 python analyze.py  # Analyzes results/summary.json
 ```
 
-## Troubleshooting
+## 🧯 Troubleshooting
 
 **Issue**: Training is slow
 - Reduce `n_envs` in `train.py` if memory is limited
