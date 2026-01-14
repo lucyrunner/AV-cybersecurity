@@ -1,0 +1,31 @@
+{
+  "scenario": "challenging",
+  "epsilon": 0.02,
+  "n_episodes": 100,
+  "baseline": {
+    "collision_rate": 0.0,
+    "mean_return": -20327.314797379677,
+    "std_return": 923.3539731664231,
+    "mean_jerk": 0.013902076072407475,
+    "mean_rmse": 0.0,
+    "std_rmse": 0.0
+  },
+  "fgsm": {
+    "collision_rate": 1.0,
+    "mean_return": -25232.818526141647,
+    "std_return": 1461.5145403209112,
+    "mean_jerk": 0.5307377711993094,
+    "mean_rmse": 3.033724308013916,
+    "std_rmse": 0.059897877275943756,
+    "epsilon": 0.02
+  },
+  "oia": {
+    "collision_rate": 1.0,
+    "mean_return": -25868.510385869675,
+    "std_return": 1740.3559076829029,
+    "mean_jerk": 0.5070082408141349,
+    "mean_rmse": 3.067678451538086,
+    "std_rmse": 0.08332507312297821,
+    "epsilon": 0.02
+  }
+}
