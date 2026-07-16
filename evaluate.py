@@ -69,7 +69,13 @@ def evaluate_single_condition(vec_env, base_env, model, attack, n_episodes,
             action, _ = model.predict(obs_for_policy, deterministic=True)
             
             # Step environment
-            obs, reward, terminated, info = vec_env.step(action)
+            step_result = vec_env.step(action)
+            if len(step_result) == 5:
+                obs, reward, terminated, truncated, info = step_result
+            else:
+                obs, reward, done, info = step_result
+                terminated = done
+                truncated = np.zeros_like(done, dtype=bool)
             
             episode_return += reward[0]
             min_dx = min(min_dx, info[0]["dx"])
@@ -88,7 +94,7 @@ def evaluate_single_condition(vec_env, base_env, model, attack, n_episodes,
                 trajectory['lead_v'].append(info[0]["lead_v"])
                 trajectory['step_rmse'].append(step_rmse)
             
-            done = terminated[0] or info[0].get("TimeLimit.truncated", False)
+            done = terminated[0] or truncated[0] or info[0].get("TimeLimit.truncated", False)
             step += 1
         
         collisions.append(episode_collision)
