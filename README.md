@@ -1,6 +1,6 @@
 # 🚗💥 PPO and Adversarial Attacks on ACC Environment
 
-Clean implementation of the simplified 1D Adaptive Cruise Control (ACC) environment with PPO training and adversarial attacks (FGSM and OIA).
+Clean implementation of the simplified 1D Adaptive Cruise Control (ACC) environment with PPO training and adversarial attacks (FGSM and OIA). This codebase is inspired by a research paper. 
 
 ## 📁 Project Structure
 
